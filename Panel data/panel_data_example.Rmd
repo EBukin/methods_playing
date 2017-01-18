@@ -1,0 +1,197 @@
+﻿---
+title: "Приклад аналізу панельних даних"
+author: "Edaurd Bukin"
+date: "January 18, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Підготовка середовища R
+
+Список використаних пакетів
+```{r tidy=TRUE}
+packs <- c("plyr", "dplyr", "tidyr", "readxl", "car", "plm", "systemfit")
+```
+* Пакети `plyr`, `dplyr`, `tidyr` необхідні для маніпуляцій з даними
+* Пакет `readxl` необхідний для завантаження даних із фалів Excel
+* Пакети `plm`, `systemfit`, необхідні для побудови панельної регресії
+* Пакет `car` необхідний для оцінки результатів регресії
+Завантаження відсутніх пакетів (відбувається лише для тих пакетів, які відсутні)
+```{r  tidy=TRUE, message=FALSE, results='hide'}
+lapply(packs[!packs %in% installed.packages()[,1]], 
+       install.packages,
+       dependencies = TRUE)
+```
+Встановлення необхідних пакетів у робочу сесію
+```{r tidy=TRUE, message=FALSE, results='hide', warning=FALSE}
+lapply(packs, require, character.only = TRUE)
+```
+
+# Дані
+
+Спершу нам необхідно завантажити дані для аналізу у робоче середовище `R` та трансформувати їх у необхідний формат. Дані містяться у файлі 'Panel_test_data.xlsx'. Спершу ми їх завантажимо і поглянемо на таблицю.
+```{r}
+data <- 
+  read_excel(path = "./Panel_test_data.xlsx",  
+             sheet = 1,
+             col_names =  TRUE) %>% 
+  tbl_df()
+data
+```
+Як бачимо, таблиця із даними виконана у не нормалізованому форматі із ключовими ідентифікаторами `Variable` та `Firm` у перших двох стовпчиках та роками у кожному наступному стовпчику. Для того, щоб побудувати регресію за цими даними, нам необхідно їх трансформувати таким чином, щоб перші два стовпчики визначали фірму (`Firm`) та рік (`Year`), а наступні три - змінні (`Variable`). Це робиться наступним чином:
+```{r}
+data <-
+  data %>% 
+  gather(Year, Value, 3:length(.)) %>% 
+  spread(Variable, Value)
+data
+```
+
+# Звичайна не панельна регресія
+
+Побудуємо, спершу, звичайну, не панельну регресію:
+```{r}
+simple_ols <- lm(y ~ x1 + x2, data = data)
+```
+Результати побудованої регресії є наступними:
+```{r}
+summary(simple_ols)
+```
+Із результатів побудованої регресії зробимо наступні висновки:
+
+1. Побудована регресія має слабкі статистичні якості: $R^2$ adjusted = `r round(summary(simple_ols)$adj.r*100,2)`%, модельне значення  p-value = `r pf(summary(simple_ols)$fstatistic[1],summary(simple_ols)$fstatistic[2],summary(simple_ols)$fstatistic[3],lower.tail=FALSE)`.
+2. Регресійні коефіцієнти є не значимим на рівні значущості 5%.
+3. У поточній постановці, незалежні змінні $x_1$ та $x_2$ не описують залежну змінну $y$. 
+3. Для повної достовірності у результатах регресії, необхідно проаналізувати чи задовольняє ця модель усі припущення необхідні для побудови лінійної регресії. 
+
+Проведемо діагностику припущень необхідних для побудови лінійної регресії за допомогою діагностичних зображень:
+```{r eval=FALSE}
+par(mfrow=c(2,2))   # Побудова графіків поряд а не на різних сторінках
+plot(simple_ols)    # Фактична побудова графіків
+par(mfrow=c(1,1))   # Повернення відображення до 1 графіку на сторінку
+```
+```{r echo=FALSE}
+par(mfrow=c(2,2))   # Побудова графіків поряд а не на різних сторінках
+plot(simple_ols)    # Фактична побудова графіків
+par(mfrow=c(1,1))   # Повернення відображення до 1 графіку на сторінку
+```
+
+*  Перевірка припущення про лінійність або рівномірність дисперсії (варіації) залишків (homoscedasticity of variance) відбувається за зображеннями `Residuals vs Fitted` та `Scale location` та за допомогою тесту Брюшк-Пагана. Зважаючи на те, що пряма, позначена на графіках червоним, лежить горизонтально, ми можемо вважати, що залишки рівномірно розподілені відносно передбаченої величини, а також існує лінійна залежність. Додатково, можемо застосувати тест Брюшк-Пагана (Breusch–Pagan) із нульовою гіпотезою про те, що варіація залишків є постійною $H_0=\textrm{constant variance}$ та альтернативною гіпотезою $H_1=\textrm{not constant variance}$. У випадку, якщо `p-value` тесту Брюшк-Пагана є більше ніж 0.05, ми приймаємо (не відхиляємо) гіпотезу $H_0$:  
+```{r}
+ncvTest(simple_ols)
+```  
+
+*  Перевірка нормальності розподілу залишків відбувається за графіком `Normal Q-Q` та/або спираючись на центральну граничну теорему та/або за допомогою тесту Шапіро-Вілк (Shapiro–Wilk) або тесту Колмогорова-Смірнова. Зважаючи, що кількість спостережень більше 40, ми можемо припустити, що хвости розподілені нормально не використовуючи будь-який тест.  
+*  Перевірка припущення про незалежність незалежних змінних ($x_1$ від $x_2$). Ми припускаємо, що ці змінні є незалежними, спираючись на природу їх походження.
+
+За додатковою інформацією про діагностику результатів регресії звертайтеся до <http://data.library.virginia.edu/diagnostic-plots/>, або <http://socserv.socsci.mcmaster.ca/jfox/Courses/Brazil-2009/index.html>, або <http://sphweb.bumc.bu.edu/otlt/MPH-Modules/BS/R/R5_Correlation-Regression/R5_Correlation-Regression7.html>, або <http://www.cookbook-r.com/Statistical_analysis/>.
+
+
+Висновки із звичайної лінійної регресії:
+
+*  Зважаючи на те, що модель погано передбачує результуючу ознаку, необхідно побудувати іншу модель.
+
+# Побудова панельної регресії
+
+Для того, щоб побудувати панельну регресію, першим чином, необхідно перетворити існуючі дані на панельні. Нижченаведене перетворення робить таблицю із ключовим стовпчиком, який відповідає вимірам панельних даних: індивідуальному ефекту та часу. 
+```{r}
+p_data <- 
+  pdata.frame(data, 
+              index = c("Firm", "Year"), 
+              drop.index = TRUE, 
+              row.names = TRUE)
+head(p_data)
+```
+Підчас перетворення даних на панельні, функція `pdata.frame` перетворила змінні `Firm` та `Year` на індекс масиву даних.
+
+## Проста панельна регресія із одним виміром (час або індивідуальний ефект)
+
+# Check applied econometrics with R pages 93-96 (84->)
+
+# CONTINUE HERE -----------------------------------------------------------
+
+
+
+
+
+#################### 1.1.oneway only individual (no time dimension) effect ####################
+
+#The specification for fixed effects estimations is 'within'
+#Take the individual (not time) effect into account 
+pls_fixed <- plm(y ~ x1 + x2, data = p_data, model = "within", effect="twoways")
+
+# See the summary of the model
+summary(pls_fixed)
+
+# See the individual fixed effect of each firm 
+fixef(pls_fixed, effect="individual", type = "level")
+fixef(pls_fixed, effect="time", type = "level")
+
+
+
+#################### 1.2.twoway: time + individual effect ####################
+
+p_twoway <- plm(y ~ x1 + x2, data = p_data, model = "within", effect = "twoways")
+summary(p_twoway)
+
+# See the individual fixed effect of each firm 
+fixef(p_twoway, effect="time", type = "dmean")
+
+#Ask for the individual effects on the mean score
+
+fixef(p_twoway, effect="individual", type = "dmean")
+
+
+fixef(p_twoway)
+
+#notice that the coefficients' estimates change
+#The coefficients indicates how much Y changes in controlling for differences in time and between individuals
+
+
+
+
+## Fixed effects model
+
+pmodel4 <- plm(inf ~ cbilag1 + glag1 + tlag1 + flag1 + infalag1 + ulag1 + cwb, data=BankData, index=c("ctry", "year"), na.action=na.omit, model="within")
+summary(pmodel4)
+
+## F test for fixed effects
+
+pFtest(pmodel4,olsmodel2)
+
+## Random effects model 
+
+pmodel5 <- plm(inf ~ cbilag1 + glag1 + tlag1 + flag1 + infalag1 + ulag1 + cwb, data=BankData, index=c("ctry", "year"), na.action=na.omit, model="random")
+
+## Crash because of negative estimated variance of individual effects
+
+## Use different method of calculating variance of random effects
+## random.method options only work on balanced panels
+
+pmodel5 <- plm(inf ~ cbilag1 + glag1 + tlag1 + flag1 + infalag1 + ulag1 + cwb, data=BankData, index=c("ctry", "year"), na.action=na.omit, model="random", random.method="walhus")
+summary(pmodel5)
+
+## Breusch-Pagan test 
+
+plmtest(pmodel5, effect="individual", type="bp")
+
+## Hausman test
+
+phtest(pmodel4, pmodel5)
+Перед тим, як перейти до трактування результатів регресії, проведемо діагностику результатів регресії на відповідність основним припузенням:
+
+1. Перевірка рівномірності розподілу залишків
+2. Перевірка нормальності розподілу залишків
+3. Розподіл масштабу по відношенню до передбачених величин
+4. Розподідл залишків відносно впливових величин
+
+За додатковою інфомрацією про діагностику результатів регресії звертайтеся до <http://data.library.virginia.edu/diagnostic-plots/> або <http://socserv.socsci.mcmaster.ca/jfox/Courses/Brazil-2009/index.html>.
+
+
+
+
+
+
