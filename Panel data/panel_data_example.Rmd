@@ -1,8 +1,11 @@
 ---
-title: "Приклад аналізу панельних даних"
+title: "Panel regression with R"
 author: "Edaurd Bukin"
 date: "January 18, 2017"
-output: html_document
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -64,7 +67,7 @@ data <-
 data
 ```
 
-Поглянемо на наші данні. Як бачиом із "бокс плоту" зліва (Box pllot)
+Поглянемо на наші данні. Як бачиом із "боксплоту" (Box plot) зліва, залежна змінна, яка міститься у наших жаних, варіюється від від 30 до 51 із середнім близько 37.8. Водночас, боксплот справа показує, що залежна змінна $y$ значно відрізняється в залежності від фірми. Спробуємо проаналізувати ці данні за допомогою регресійного аналізу та передчачити залежну змінну $y$ за допомогою двох незалежних $x_1$ та $x_2$.
 
 ```{r eval=FALSE}
 par(mfrow=c(2,1))     # Побудова графіків поряд а не на різних сторінках
@@ -92,7 +95,7 @@ g +
 par(mfrow=c(1,1))  # Повернення відображення до 1 графіку на сторінк
 ```
 ```{r echo=FALSE}
-par(mfrow=c(2,1))     
+par(mfcol=c(2,1))     
 g <- 
   ggplot(data) + 
   aes(x = as.factor(1), y = y) + 
@@ -115,7 +118,7 @@ par(mfrow=c(1,1))
 
 # Звичайна лінійна регресія
 
-Побудуємо, спершу, звичайну лінійну, не панельну регресію:
+Побудуємо, спершу, звичайну лінійну (не панельну) регресію:
 
 ```{r tidy=TRUE}
 simple_ols <- lm(y ~ x1 + x2, data = data)
@@ -157,7 +160,6 @@ ncvTest(simple_ols)
 
 За додатковою інформацією про діагностику результатів регресії звертайтеся до <http://data.library.virginia.edu/diagnostic-plots/>, або <http://socserv.socsci.mcmaster.ca/jfox/Courses/Brazil-2009/index.html>, або <http://sphweb.bumc.bu.edu/otlt/MPH-Modules/BS/R/R5_Correlation-Regression/R5_Correlation-Regression7.html>, або <http://www.cookbook-r.com/Statistical_analysis/>.
 
-
 Висновки на основі звичайної лінійної регресії:
 
 *  Зважаючи на те, що модель погано передбачує результуючу ознаку, необхідно побудувати іншу модель.
@@ -182,29 +184,26 @@ head(p_data)
 
 ## Проста панельна регресія із одним виміром часу або індивідуальним ефектом
 
-Побудуємо просту лінійну регресію
+Метою наступної панельної регресії є оцінка регресійних коеффіцієнстів незалежних змінних $x_1$ та $x_2$ для передбачення залежної змінної $y$ із урахуванням фіксованого ефекту кожної фірми. Модель, яку ми будємо нижче виглядає наступним чином: $\hat{y_{it}}=\beta_1 x^1_{it} + \beta_2 x^2_{it} + a_i + v_{it}$, де $a_i$ це індивідуальние фект кожної окремої фірми $i$, t$ це роки. Побудуємо просту панельну регресію:
 
-# Check applied econometrics with R pages 93-96 (84->)
+```{r}
+pls_fixed <- plm(y ~ x1 + x2, data = p_data, model = "within", effect = "individual")
+```
 
-# CONTINUE HERE -----------------------------------------------------------
+Значення параметру `model = "within"` визначє, що ми досліджуємо сталий ефект фірми на залежу ознаку. Значення параметру `effect="individual"` свідчить про те, що ми виключно шукаємо індивідуальние ефект кожної фірми не враховуючи ефект часу.
 
+Поглянемо на результати панельної регресії.
 
-
-
-
-#################### 1.1.oneway only individual (no time dimension) effect ####################
-
-#The specification for fixed effects estimations is 'within'
-#Take the individual (not time) effect into account 
-pls_fixed <- plm(y ~ x1 + x2, data = p_data, model = "within", effect="twoways")
-
-# See the summary of the model
+```{r}
 summary(pls_fixed)
+```
 
-# See the individual fixed effect of each firm 
+Панельна решгресія демонтрує значно кращі передбачувальні властивості порівняно із звичайною лінійною регресією, $R^2 \textrm{adjusted} =$`r round(summary(pls_fixed)$r.squared[2]*100,2)`%, модельне значення  $p-value =$ `r summary(pls_fixed)$fstatistic$p.value`. Крім того, коефіцієнти усих незалежних змінних є значимим на рівні 5%. Для того, щоб полянути на індивідуальний ефект кожної фірми ми використаємо функцію `fixef`, де параметр  `effect="individual"` свідчить про те, що ми аналізуємо індивідуальние ефект кожної фірми. Для того, щоб полянути на значимість кожного із індивідуальних ефектів, скористуємося функцією `summary()`:
+
+```{r}
 fixef(pls_fixed, effect="individual", type = "level")
-fixef(pls_fixed, effect="time", type = "level")
-
+summary(fixef(pls_fixed, effect="individual", type = "level"))
+```
 
 
 #################### 1.2.twoway: time + individual effect ####################
